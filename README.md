@@ -133,9 +133,21 @@ Ensure the application adheres to best practices for Svelte development, includi
 
 ## Configuration
 
-- **Model**: Change `MODEL` in `prompt-enhance.py` to use different OpenAI models
-- **System Instructions**: Modify `instructions.md` to customize the enhancement behavior
-- **Timeout**: Adjust `TIMEOUT` for different response times
+- **Model**: Defaults to `gpt-6.2-astra`, OpenAI's current flagship chat/text model ([models catalog](https://developers.openai.com/api/docs/models)). Override with `--model`, then the `PROMPT_ENHANCE_MODEL` environment variable, then the default.
+
+  ```bash
+  uv run prompt-enhance.py --model gpt-6.2-sol "Need help sorting a list faster in JS"
+  export PROMPT_ENHANCE_MODEL="gpt-6.2-sol"
+  ```
+
+- **System Instructions**: Defaults to `instructions.md` next to `prompt-enhance.py`. Override the path with `PROMPT_ENHANCE_INSTRUCTIONS`. Edit the file to customize enhancement behavior.
+
+  ```bash
+  export PROMPT_ENHANCE_INSTRUCTIONS="/path/to/custom-instructions.md"
+  ```
+
+- **Timeout**: Adjust `TIMEOUT` in `prompt-enhance.py` for different response times
+- **API key**: `OPENAI_API_KEY` must be set (see Setup above)
 
 ## Architecture
 
