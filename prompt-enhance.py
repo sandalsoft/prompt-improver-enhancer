@@ -15,6 +15,7 @@ USAGE EXAMPLES
 --------------
   uv run prompt-enhance.py "Need help sorting a list faster in JS"
   uv run prompt-enhance.py --prompt "Need help sorting a list faster in JS"
+  uv run prompt-enhance.py --model gpt-6.2-sol "Need help sorting a list faster in JS"
   echo "Need help sorting a list faster in JS" | uv run prompt-enhance.py
   cat myprompt.txt | uv run prompt-enhance.py
 """
@@ -25,26 +26,49 @@ import openai
 from halo import Halo
 
 # ─────────────────── Configuration ─────────────────── #
-MODEL = "gpt-4o"   # Any chat-capable model your key can access
+# Flagship chat/text model from OpenAI's models catalog:
+# https://developers.openai.com/api/docs/models
+DEFAULT_MODEL = "gpt-6.2-astra"
 TIMEOUT = 30              # Seconds
-INSTRUCTIONS_FILE = "/Users/eric/Development/AI/PromptImprove/openai-prompt-improver/instructions.md"
 # ────────────────────────────────────────────────────── #
 
 
-def load_system_prompt() -> str:
+def default_instructions_path() -> str:
+    """instructions.md next to this script."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "instructions.md")
+
+
+def resolve_instructions_path() -> str:
+    """PROMPT_ENHANCE_INSTRUCTIONS, then the script-adjacent default."""
+    env_path = os.getenv("PROMPT_ENHANCE_INSTRUCTIONS", "").strip()
+    return env_path or default_instructions_path()
+
+
+def resolve_model(cli_model):
+    """`--model`, then PROMPT_ENHANCE_MODEL, then DEFAULT_MODEL."""
+    if cli_model and cli_model.strip():
+        return cli_model.strip()
+    env_model = os.getenv("PROMPT_ENHANCE_MODEL", "").strip()
+    return env_model or DEFAULT_MODEL
+
+
+def load_system_prompt(path=None) -> str:
     """Load the system prompt from instructions.md file."""
+    instructions_file = path or resolve_instructions_path()
     try:
-        with open(INSTRUCTIONS_FILE, "r", encoding="utf-8") as f:
+        with open(instructions_file, "r", encoding="utf-8") as f:
             content = f.read().strip()
             # Remove the markdown header if present
             if content.startswith("# Instructions\n"):
                 content = content[len("# Instructions\n"):].strip()
             return content
     except FileNotFoundError:
-        sys.stderr.write("Error: instructions.md file not found.\n")
+        sys.stderr.write(
+            f"Error: instructions file not found: {instructions_file}\n")
         sys.exit(1)
     except Exception as e:
-        sys.stderr.write(f"Error reading instructions.md: {e}\n")
+        sys.stderr.write(f"Error reading {instructions_file}: {e}\n")
         sys.exit(1)
 
 
@@ -58,8 +82,8 @@ def read_stdin() -> str:
     return data
 
 
-def get_prompt() -> str:
-    """Get prompt from command line argument or stdin."""
+def get_prompt():
+    """Get prompt, silent flag, and model from CLI, env, or stdin."""
     parser = argparse.ArgumentParser(
         description="Refine a raw software-development prompt using the Code-Prompt Polisher system.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -69,6 +93,7 @@ USAGE EXAMPLES:
   cat myprompt.txt | python polish_prompt.py
   python polish_prompt.py "Need help sorting a list faster in JS"
   python polish_prompt.py --prompt "Need help sorting a list faster in JS"
+  python polish_prompt.py --model gpt-6.2-sol "Need help sorting a list faster in JS"
   python polish_prompt.py -s "Need help sorting a list faster in JS" > output.txt
         """.strip()
     )
@@ -81,6 +106,14 @@ USAGE EXAMPLES:
         "--prompt",
         dest="prompt_flag",
         help="The prompt to polish (alternative to positional argument)"
+    )
+    parser.add_argument(
+        "--model",
+        metavar="MODEL",
+        help=(
+            "OpenAI chat model. Precedence: this flag, then "
+            f"PROMPT_ENHANCE_MODEL, then {DEFAULT_MODEL}."
+        ),
     )
     parser.add_argument(
         "-s", "--silent",
@@ -102,11 +135,26 @@ USAGE EXAMPLES:
                 "No prompt provided. Either pass as argument or pipe to stdin.")
         prompt = read_stdin()
 
-    return prompt, args.silent
+    return prompt, args.silent, resolve_model(args.model)
+
+
+def enhance_prompt(raw_prompt, system_prompt, model):
+    """Call Chat Completions with params compatible with current flagship models."""
+    # gpt-6.2-* reasoning models reject temperature, top_p, logprobs,
+    # top_logprobs, and max_tokens. Omit them; use max_completion_tokens
+    # only if a caller later needs an output cap.
+    return openai.chat.completions.create(
+        model=model,
+        timeout=TIMEOUT,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": raw_prompt},
+        ],
+    )
 
 
 def main() -> None:
-    raw_prompt, silent_mode = get_prompt()
+    raw_prompt, silent_mode, model = get_prompt()
     system_prompt = load_system_prompt()
 
     api_key = os.getenv("OPENAI_API_KEY")
@@ -121,14 +169,7 @@ def main() -> None:
         spinner = Halo(text="Refining prompt...", spinner="dots")
         spinner.start()
 
-    response = openai.chat.completions.create(
-        model=MODEL,
-        timeout=TIMEOUT,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": raw_prompt},
-        ],
-    )
+    response = enhance_prompt(raw_prompt, system_prompt, model)
 
     if not silent_mode:
         spinner.stop()
